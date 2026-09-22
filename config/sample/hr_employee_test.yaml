@@ -1,0 +1,134 @@
+# Sample metadata: HR phase-1 batch pipeline test.
+#   Workday RAS report --(GlobalScape)--> GCS --(Dataflow)--> PostgreSQL
+#   layered schema: staging -> curated -> consumption, SCD Type 2 + Type 4.
+#
+# Templating: {{ params.* }} resolves from DAG params at runtime,
+#             {{ var.value.* }} resolves from Airflow Variables.
+version: "1.0"
+
+pipeline:
+  name: hr-ras-to-postgres
+  description: >
+    Phase-1 batch: Workday RAS report (fetched by GlobalScape) lands in GCS,
+    a Dataflow Flex Template loads it into PostgreSQL layered schemas
+    (staging/curated/consumption) applying SCD Type 2 and Type 4.
+
+  gcs:
+    bucket: "{{ var.value.gcs_bucket }}"
+    test_prefix: "etl-tests/{{ params.test_run_id }}"
+
+  dataflow:
+    project: "{{ var.value.gcp_project }}"
+    region: "{{ var.value.dataflow_region }}"
+    template_path: "{{ var.value.dataflow_template_path }}"
+    temp_location: "gs://{{ var.value.gcs_bucket }}/temp"
+    parameters:
+      inputFile: "gs://{{ var.value.gcs_bucket }}/{{ params.test_prefix }}/workday_ras_report.csv"
+      pgHost: "{{ var.value.pg_host }}"
+      pgDatabase: "{{ var.value.pg_database }}"
+      targetSchemaPrefix: "{{ params.test_schema }}"
+
+  postgres:
+    conn_id: "{{ var.value.pg_conn_id }}"
+    schemas:
+      staging: "{{ params.test_schema }}_staging"
+      curated: "{{ params.test_schema }}_curated"
+      consumption: "{{ params.test_schema }}_consumption"
+    results_schema: "etl_test_audit"
+
+  cleanup_after_run: true
+  fail_on_failure: true
+
+test_data:
+  # Local path is relative to this metadata file.
+  source_file: "test_data/workday_ras_report_sample.csv"
+  gcs_key: "{{ params.test_prefix }}/workday_ras_report.csv"
+
+test_cases:
+  # ---- file layer -------------------------------------------------------
+  - id: TC01
+    name: "Source file landed in GCS"
+    type: gcs_file_exists
+    bucket: "{{ var.value.gcs_bucket }}"
+    key: "{{ params.test_prefix }}/workday_ras_report.csv"
+
+  # ---- load layer -------------------------------------------------------
+  - id: TC02
+    name: "Staging row count matches source file"
+    type: row_count
+    source: { kind: csv, path: "test_data/workday_ras_report_sample.csv" }
+    target: { kind: table, schema: "{{ params.test_schema }}_staging", table: stg_employee }
+    tolerance: 0
+
+  - id: TC03
+    name: "Staging schema matches contract"
+    type: schema_match
+    schema: "{{ params.test_schema }}_staging"
+    table: stg_employee
+    case_sensitive_names: false
+    columns:
+      - { name: employee_id, type: varchar }
+      - { name: first_name, type: varchar }
+      - { name: last_name, type: varchar }
+      - { name: email, type: varchar }
+      - { name: department, type: varchar }
+      - { name: job_title, type: varchar }
+      - { name: location, type: varchar }
+      - { name: hire_date, type: date }
+      - { name: employment_status, type: varchar }
+
+  # ---- transform layer --------------------------------------------------
+  - id: TC04
+    name: "Curated SCD2 row count matches consumption history table"
+    type: row_count
+    source: { kind: table, schema: "{{ params.test_schema }}_curated", table: cur_employee_scd2 }
+    target: { kind: table, schema: "{{ params.test_schema }}_consumption", table: cons_employee_history }
+    tolerance: 0
+
+  - id: TC05
+    name: "SCD2 integrity on curated employee dimension"
+    type: scd2_integrity
+    schema: "{{ params.test_schema }}_curated"
+    table: cur_employee_scd2
+    business_key: [employee_id]
+    eff_from: eff_start_date
+    eff_to: eff_end_date
+    is_current: is_current
+    open_ended: "9999-12-31"
+    check_contiguity: true
+
+  - id: TC06
+    name: "SCD4 current/history consistency in consumption"
+    type: scd4_consistency
+    current: { schema: "{{ params.test_schema }}_consumption", table: cons_employee }
+    history: { schema: "{{ params.test_schema }}_consumption", table: cons_employee_history }
+    business_key: [employee_id]
+    history_eff_from: eff_start_date
+    allow_orphan_history: false
+    compare_columns:
+      [first_name, last_name, email, department, job_title, location, employment_status]
+
+  # ---- data-quality layer -----------------------------------------------
+  - id: TC07
+    name: "No null business keys / SCD markers in curated"
+    type: not_null
+    schema: "{{ params.test_schema }}_curated"
+    table: cur_employee_scd2
+    columns: [employee_id, eff_start_date, eff_end_date, is_current]
+
+  - id: TC08
+    name: "employee_id unique in consumption current table"
+    type: unique
+    schema: "{{ params.test_schema }}_consumption"
+    table: cons_employee
+    columns: [employee_id]
+
+  - id: TC09
+    name: "department references dim_department"
+    type: referential_integrity
+    schema: "{{ params.test_schema }}_consumption"
+    table: cons_employee
+    column: department
+    ref_schema: "{{ params.test_schema }}_consumption"
+    ref_table: dim_department
+    ref_column: department_name
