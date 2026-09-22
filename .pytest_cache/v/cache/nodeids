@@ -1,0 +1,16 @@
+[
+  "tests/unit/test_metadata_loader.py::test_load_metadata_rejects_bad",
+  "tests/unit/test_metadata_loader.py::test_load_sample_metadata_renders",
+  "tests/unit/test_metadata_loader.py::test_render_templates",
+  "tests/unit/test_validators.py::test_not_null_fail_and_unique_fail",
+  "tests/unit/test_validators.py::test_referential_integrity",
+  "tests/unit/test_validators.py::test_row_count_mismatch_fail",
+  "tests/unit/test_validators.py::test_row_count_percent_tolerance",
+  "tests/unit/test_validators.py::test_row_count_table_vs_table_pass",
+  "tests/unit/test_validators.py::test_scd2_clean_pass",
+  "tests/unit/test_validators.py::test_scd2_gap_fail",
+  "tests/unit/test_validators.py::test_scd2_overlap_fail",
+  "tests/unit/test_validators.py::test_scd2_two_current_fail",
+  "tests/unit/test_validators.py::test_scd4_pass_and_mismatch",
+  "tests/unit/test_validators.py::test_unknown_validator_type"
+]
