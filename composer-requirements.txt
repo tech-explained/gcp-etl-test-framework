@@ -1,0 +1,5 @@
+# Install into the Cloud Composer environment (gcloud composer environments update
+# --update-pypi-packages-from-file=composer-requirements.txt). The google and
+# postgres providers ship with Composer; only the framework's own deps go here.
+pyyaml>=6.0
+jsonschema>=4.0
